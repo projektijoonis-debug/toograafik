@@ -439,6 +439,114 @@ body {
 }
 .btn-icon:hover { background: var(--bg3); color: #E24B4A; }
 
+/* Secondary button */
+.secondary-btn {
+  padding: 7px 14px;
+  background: none;
+  border: 0.5px solid var(--border2);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.secondary-btn:hover { background: var(--bg2); }
+
+/* Legend */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 1rem;
+  padding: 10px 14px;
+  background: var(--bg2);
+  border-radius: var(--radius);
+  border: 0.5px solid var(--border);
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text2);
+}
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Modal list (employees & locations) */
+.list-scroll {
+  max-height: 220px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius);
+}
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 0.5px solid var(--border);
+  font-size: 14px;
+  color: var(--text);
+}
+.list-row:last-child { border-bottom: none; }
+.list-row-name { flex: 1; }
+
+.loc-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.inline-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.inline-add input[type="text"] {
+  flex: 1;
+  padding: 8px 10px;
+  border: 0.5px solid var(--border2);
+  border-radius: var(--radius);
+  font-size: 14px;
+  background: var(--bg);
+  color: var(--text);
+}
+.inline-add input[type="text"]:focus {
+  outline: none;
+  border-color: var(--blue);
+}
+
+/* Color presets */
+.color-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.preset-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.1s;
+}
+.preset-dot:hover { transform: scale(1.18); }
+.preset-dot.selected {
+  border-color: var(--text);
+  transform: scale(1.15);
+}
+
 /* Responsive */
 @media (max-width: 600px) {
   body { padding: 0; }

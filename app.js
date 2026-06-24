@@ -5,17 +5,9 @@ const MONTHS = ['Jaanuar','Veebruar','Märts','Aprill','Mai','Juuni',
 const DAYS = ['E','T','K','N','R','L','P'];
 const DAYS_FULL = ['Pühapäev','Esmaspäev','Teisipäev','Kolmapäev','Neljapäev','Reede','Laupäev'];
 
-const COLORS = [
-  {bg:'#E6F1FB',text:'#185FA5'},
-  {bg:'#EAF3DE',text:'#3B6D11'},
-  {bg:'#FAEEDA',text:'#854F0B'},
-  {bg:'#EEEDFE',text:'#534AB7'},
-  {bg:'#E1F5EE',text:'#0F6E56'},
-  {bg:'#FAECE7',text:'#993C1D'},
-  {bg:'#FBEAF0',text:'#993556'},
-  {bg:'#F1EFE8',text:'#5F5E5A'},
-  {bg:'#E8F8FF',text:'#0C5C7C'},
-  {bg:'#FFF8E8',text:'#7A4F00'},
+const PRESET_COLORS = [
+  '#378ADD','#3B9E5A','#E07B2A','#9B59B6','#E84393',
+  '#16A085','#C0392B','#2C3E50','#F39C12','#1ABC9C'
 ];
 
 const today = new Date();
@@ -29,50 +21,59 @@ let state = {
   modal: null,
   selectedEmployee: null,
   employees: ['Mari','Jaan','Kati','Toomas','Anna','Liis','Peeter','Siim','Eva','Maret'],
+  locations: [
+    { id: 'loc1', name: 'Kauplus A', color: '#378ADD' },
+    { id: 'loc2', name: 'Ladu', color: '#3B9E5A' },
+    { id: 'loc3', name: 'Kontor', color: '#E07B2A' },
+  ],
 };
 
 // ---- UTILS ----
-
-function uid() {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
-}
-
+function uid() { return Math.random().toString(36).slice(2) + Date.now().toString(36); }
 function shiftKey(y, m, d) {
   return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
 }
-
-function empColor(emp) {
-  const idx = state.employees.indexOf(emp);
-  return COLORS[(idx < 0 ? 0 : idx) % COLORS.length];
+function getLocation(id) { return state.locations.find(l => l.id === id); }
+function hexToRgb(hex) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return {r,g,b};
 }
+function lightBg(hex) {
+  const {r,g,b} = hexToRgb(hex);
+  return `rgba(${r},${g},${b},0.13)`;
+}
+function darkText(hex) { return hex; }
 
 // ---- PERSIST ----
-
 function save() {
   try {
     localStorage.setItem('g_shifts', JSON.stringify(state.shifts));
     localStorage.setItem('g_swaps', JSON.stringify(state.swapRequests));
     localStorage.setItem('g_employees', JSON.stringify(state.employees));
+    localStorage.setItem('g_locations', JSON.stringify(state.locations));
   } catch(e) {}
 }
-
 function load() {
   try {
     const s = localStorage.getItem('g_shifts');
     const w = localStorage.getItem('g_swaps');
     const e = localStorage.getItem('g_employees');
+    const l = localStorage.getItem('g_locations');
     if (s) state.shifts = JSON.parse(s);
     if (w) state.swapRequests = JSON.parse(w);
     if (e) state.employees = JSON.parse(e);
+    if (l) state.locations = JSON.parse(l);
   } catch(e) {}
   if (!state.selectedEmployee || !state.employees.includes(state.selectedEmployee)) {
     state.selectedEmployee = state.employees[0] || null;
   }
 }
-
 function initDemo() {
   const y = state.year, m = state.month;
   const dim = new Date(y, m+1, 0).getDate();
+  const locIds = state.locations.map(l => l.id);
   const pairs = [
     ['Mari','08:00','16:00'],['Jaan','16:00','00:00'],['Kati','08:00','16:00'],
     ['Toomas','12:00','20:00'],['Anna','08:00','16:00'],['Liis','07:00','15:00'],
@@ -84,15 +85,13 @@ function initDemo() {
     state.shifts[key] = [];
     const count = 2 + Math.floor(Math.random() * 3);
     [...pairs].sort(() => Math.random()-0.5).slice(0, count).forEach(([emp,start,end]) => {
-      state.shifts[key].push({emp, start, end, id: uid()});
+      const locId = locIds[Math.floor(Math.random()*locIds.length)];
+      state.shifts[key].push({emp, start, end, locId, id: uid()});
     });
   }
 }
 
 // ---- RENDER ----
-// Everything renders into ONE container div so modal buttons are always in the DOM
-// when attachEvents() runs.
-
 function render() {
   document.getElementById('app').innerHTML =
     `<div class="app">${buildHeader()}${buildBody()}${state.modal ? buildModal() : ''}</div>`;
@@ -125,8 +124,19 @@ function buildBody() {
   return state.view === 'manager' ? buildManagerView() : buildWorkerView();
 }
 
-// ---- MANAGER ----
+// ---- LEGEND ----
+function buildLegend() {
+  if (!state.locations.length) return '';
+  return `<div class="legend">
+    ${state.locations.map(l => `
+      <div class="legend-item">
+        <span class="legend-dot" style="background:${l.color}"></span>
+        <span class="legend-name">${l.name}</span>
+      </div>`).join('')}
+  </div>`;
+}
 
+// ---- MANAGER ----
 function buildManagerView() {
   return `
   <div class="top-bar">
@@ -136,13 +146,21 @@ function buildManagerView() {
       </svg>
       Lisa vahetus
     </button>
-    <button class="add-btn" id="btn-manage-emp" style="background:var(--bg2);color:var(--text);border:0.5px solid var(--border2);">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+    <button class="secondary-btn" id="btn-manage-emp">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
       </svg>
-      Töötajad (${state.employees.length})
+      Töötajad
+    </button>
+    <button class="secondary-btn" id="btn-manage-loc">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+        <circle cx="12" cy="9" r="2.5"/>
+      </svg>
+      Töökohad
     </button>
   </div>
+  ${buildLegend()}
   ${buildCalendar()}
   ${buildSwapSection()}`;
 }
@@ -154,7 +172,6 @@ function buildCalendar() {
   const dim = new Date(y, m+1, 0).getDate();
   const prevDim = new Date(y, m, 0).getDate();
   let cells = '';
-
   for (let i = 0; i < offset; i++) {
     cells += `<div class="cal-cell other-month"><div class="day-num">${prevDim-offset+i+1}</div></div>`;
   }
@@ -165,8 +182,11 @@ function buildCalendar() {
     const visible = dayShifts.slice(0, 3);
     const extra = dayShifts.length - 3;
     const pills = visible.map(s => {
-      const c = empColor(s.emp);
-      return `<span class="shift-pill" style="background:${c.bg};color:${c.text}" data-shiftid="${s.id}" data-key="${key}">${s.emp} ${s.start}</span>`;
+      const loc = getLocation(s.locId);
+      const bg = loc ? lightBg(loc.color) : '#f0f0f0';
+      const border = loc ? loc.color : '#aaa';
+      const text = loc ? darkText(loc.color) : '#555';
+      return `<span class="shift-pill" style="background:${bg};color:${text};border-left:3px solid ${border}" data-shiftid="${s.id}" data-key="${key}">${s.emp} ${s.start}</span>`;
     }).join('');
     cells += `<div class="cal-cell${isToday?' today':''}" data-addday="${d}">
       <div class="day-num">${d}</div>${pills}
@@ -200,11 +220,8 @@ function buildSwapSection() {
 }
 
 // ---- WORKER ----
-
 function buildWorkerView() {
-  if (!state.employees.length) {
-    return `<div class="empty-msg">Töötajaid pole lisatud. Juhi vaates lisa töötajaid.</div>`;
-  }
+  if (!state.employees.length) return `<div class="empty-msg">Töötajaid pole lisatud.</div>`;
   const emp = state.selectedEmployee || state.employees[0];
   const y = state.year, m = state.month;
   const dim = new Date(y, m+1, 0).getDate();
@@ -214,9 +231,7 @@ function buildWorkerView() {
     const s = (state.shifts[key]||[]).find(x => x.emp === emp);
     if (s) myShifts.push({d, key, s});
   }
-  const c = empColor(emp);
   const myReqs = state.swapRequests.filter(r => r.emp === emp);
-
   return `<div class="top-bar">
     <select id="emp-select">
       ${state.employees.map(e => `<option${e===emp?' selected':''}>${e}</option>`).join('')}
@@ -234,9 +249,17 @@ function buildWorkerView() {
       : myShifts.map(({d, s}) => {
           const isToday = today.getFullYear()===y && today.getMonth()===m && today.getDate()===d;
           const dow = new Date(y,m,d).getDay();
+          const loc = getLocation(s.locId);
+          const bg = loc ? lightBg(loc.color) : '#f5f5f5';
+          const border = loc ? loc.color : '#ccc';
+          const textCol = loc ? loc.color : '#555';
           return `<div class="emp-row">
             <div class="emp-date">${DAYS_FULL[dow]}, ${d}. ${MONTHS[m].slice(0,3)}${isToday?' <span class="badge badge-info">Täna</span>':''}</div>
-            <div class="emp-shifts"><span class="emp-shift-tag" style="background:${c.bg};color:${c.text}">${s.start} &ndash; ${s.end}</span></div>
+            <div class="emp-shifts">
+              <span class="emp-shift-tag" style="background:${bg};color:${textCol};border-left:3px solid ${border}">
+                ${s.start}&ndash;${s.end}${loc ? ` &bull; ${loc.name}` : ''}
+              </span>
+            </div>
           </div>`;
         }).join('')}
   </div>
@@ -250,48 +273,53 @@ function buildWorkerView() {
 }
 
 // ---- MODALS ----
+function locOptions(selectedId) {
+  if (!state.locations.length) return `<option value="">-- Lisa esmalt töökohad --</option>`;
+  return state.locations.map(l =>
+    `<option value="${l.id}"${l.id===selectedId?' selected':''}>${l.name}</option>`
+  ).join('');
+}
 
 function buildModal() {
   const m = state.modal;
 
   if (m.type === 'add') {
     const defDate = `${state.year}-${String(state.month+1).padStart(2,'0')}-${String(m.day||today.getDate()).padStart(2,'0')}`;
-    return `<div class="modal-bg" id="modal-bg">
-      <div class="modal" role="dialog" aria-modal="true">
-        <h3>Lisa vahetus</h3>
-        <label for="m-emp">Töötaja</label>
-        <select id="m-emp">
-          ${state.employees.map(e=>`<option>${e}</option>`).join('')}
-        </select>
-        <label for="m-date">Kuupäev</label>
-        <input type="date" id="m-date" value="${defDate}">
-        <label for="m-start">Algus</label>
-        <input type="time" id="m-start" value="08:00">
-        <label for="m-end">Lõpp</label>
-        <input type="time" id="m-end" value="16:00">
-        <div class="modal-actions">
-          <button class="btn-secondary" id="btn-cancel">Tühista</button>
-          <button class="btn-primary" id="btn-save">Lisa</button>
-        </div>
+    const defLoc = state.locations[0]?.id || '';
+    return `<div class="modal-bg" id="modal-bg"><div class="modal">
+      <h3>Lisa vahetus</h3>
+      <label for="m-emp">Töötaja</label>
+      <select id="m-emp">${state.employees.map(e=>`<option>${e}</option>`).join('')}</select>
+      <label for="m-date">Kuupäev</label>
+      <input type="date" id="m-date" value="${defDate}">
+      <label for="m-loc">Töökoht</label>
+      <select id="m-loc">${locOptions(defLoc)}</select>
+      <label for="m-start">Algus</label>
+      <input type="time" id="m-start" value="08:00">
+      <label for="m-end">Lõpp</label>
+      <input type="time" id="m-end" value="16:00">
+      <div class="modal-actions">
+        <button class="btn-secondary" id="btn-cancel">Tühista</button>
+        <button class="btn-primary" id="btn-save">Lisa</button>
       </div>
-    </div>`;
+    </div></div>`;
   }
 
   if (m.type === 'edit') {
-    return `<div class="modal-bg" id="modal-bg">
-      <div class="modal" role="dialog" aria-modal="true">
-        <h3>${m.shift.emp} &mdash; ${m.key}</h3>
-        <label for="m-start">Algus</label>
-        <input type="time" id="m-start" value="${m.shift.start}">
-        <label for="m-end">Lõpp</label>
-        <input type="time" id="m-end" value="${m.shift.end}">
-        <div class="modal-actions">
-          <button class="btn-danger" id="btn-delete">Kustuta</button>
-          <button class="btn-secondary" id="btn-cancel">Tühista</button>
-          <button class="btn-primary" id="btn-save">Salvesta</button>
-        </div>
+    return `<div class="modal-bg" id="modal-bg"><div class="modal">
+      <h3>${m.shift.emp} &mdash; ${m.key}</h3>
+      <label for="m-loc">Töökoht</label>
+      <select id="m-loc">${locOptions(m.shift.locId)}</select>
+      <label for="m-start">Algus</label>
+      <input type="time" id="m-start" value="${m.shift.start}">
+      <label for="m-end">Lõpp</label>
+      <input type="time" id="m-end" value="${m.shift.end}">
+      <div class="modal-actions">
+        <button class="btn-danger" id="btn-delete">Kustuta</button>
+        <button class="btn-secondary" id="btn-cancel">Tühista</button>
+        <button class="btn-primary" id="btn-save">Salvesta</button>
       </div>
-    </div>`;
+    </div></div>`;
   }
 
   if (m.type === 'swap') {
@@ -305,116 +333,153 @@ function buildModal() {
       if (s) myShifts.push({key, d, s});
     }
     if (!myShifts.length) {
-      return `<div class="modal-bg" id="modal-bg">
-        <div class="modal" role="dialog" aria-modal="true">
-          <h3>Taotle vahetust</h3>
-          <p style="color:var(--text2);font-size:14px;margin-top:0.5rem">Sul pole sellel kuul ühtegi vahetust, mida vahetada.</p>
-          <div class="modal-actions">
-            <button class="btn-secondary" id="btn-cancel">Sulge</button>
-          </div>
-        </div>
-      </div>`;
+      return `<div class="modal-bg" id="modal-bg"><div class="modal">
+        <h3>Taotle vahetust</h3>
+        <p style="color:var(--text2);font-size:14px;margin-top:0.5rem">Sul pole sellel kuul ühtegi vahetust.</p>
+        <div class="modal-actions"><button class="btn-secondary" id="btn-cancel">Sulge</button></div>
+      </div></div>`;
     }
     const defTo = `${y}-${String(mo+1).padStart(2,'0')}-${String(myShifts[0].d).padStart(2,'0')}`;
-    return `<div class="modal-bg" id="modal-bg">
-      <div class="modal" role="dialog" aria-modal="true">
-        <h3>Taotle vahetust</h3>
-        <label for="m-from">Minu vahetus (millest)</label>
-        <select id="m-from">
-          ${myShifts.map(x=>`<option value="${x.key}|${x.s.start}|${x.s.end}">${x.d}. ${MONTHS[mo].slice(0,3)} &mdash; ${x.s.start}&ndash;${x.s.end}</option>`).join('')}
-        </select>
-        <label for="m-todate">Soovitud kuupäev (millele)</label>
-        <input type="date" id="m-todate" value="${defTo}">
-        <div class="modal-actions">
-          <button class="btn-secondary" id="btn-cancel">Tühista</button>
-          <button class="btn-primary" id="btn-save">Saada taotlus</button>
-        </div>
+    return `<div class="modal-bg" id="modal-bg"><div class="modal">
+      <h3>Taotle vahetust</h3>
+      <label for="m-from">Minu vahetus (millest)</label>
+      <select id="m-from">
+        ${myShifts.map(x=>`<option value="${x.key}|${x.s.start}|${x.s.end}">${x.d}. ${MONTHS[mo].slice(0,3)} &mdash; ${x.s.start}&ndash;${x.s.end}</option>`).join('')}
+      </select>
+      <label for="m-todate">Soovitud kuupäev (millele)</label>
+      <input type="date" id="m-todate" value="${defTo}">
+      <div class="modal-actions">
+        <button class="btn-secondary" id="btn-cancel">Tühista</button>
+        <button class="btn-primary" id="btn-save">Saada taotlus</button>
       </div>
-    </div>`;
+    </div></div>`;
   }
 
   if (m.type === 'employees') {
-    return `<div class="modal-bg" id="modal-bg">
-      <div class="modal" role="dialog" aria-modal="true">
-        <h3>Töötajate haldus</h3>
-        <div id="emp-list" style="margin-bottom:12px">
-          ${state.employees.map((e,i) => `<div class="emp-list-row">
-            <span style="font-size:14px;color:var(--text);flex:1">${e}</span>
-            <button class="btn-icon" data-remove-emp="${i}" title="Kustuta">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
-              </svg>
-            </button>
-          </div>`).join('')}
-        </div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <input type="text" id="new-emp-name" placeholder="Uus nimi..." style="flex:1">
-          <button class="btn-primary" id="btn-add-emp" style="white-space:nowrap">Lisa</button>
-        </div>
-        <div class="modal-actions">
-          <button class="btn-secondary" id="btn-cancel">Sulge</button>
+    return `<div class="modal-bg" id="modal-bg"><div class="modal">
+      <h3>Töötajad</h3>
+      <div class="list-scroll">
+        ${state.employees.map((e,i) => `<div class="list-row">
+          <span>${e}</span>
+          <button class="btn-icon" data-remove-emp="${i}" title="Kustuta">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
+              <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+            </svg>
+          </button>
+        </div>`).join('')}
+      </div>
+      <div class="inline-add">
+        <input type="text" id="new-emp-name" placeholder="Uus nimi...">
+        <button class="btn-primary" id="btn-add-emp">Lisa</button>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="btn-cancel">Sulge</button>
+      </div>
+    </div></div>`;
+  }
+
+  if (m.type === 'locations') {
+    return `<div class="modal-bg" id="modal-bg"><div class="modal">
+      <h3>Töökohad</h3>
+      <div class="list-scroll">
+        ${state.locations.map((l,i) => `<div class="list-row">
+          <span class="loc-dot" style="background:${l.color}"></span>
+          <span class="list-row-name" id="loc-name-display-${i}">${l.name}</span>
+          <button class="btn-icon btn-edit-loc" data-edit-loc="${i}" title="Muuda">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+          </button>
+          <button class="btn-icon" data-remove-loc="${i}" title="Kustuta">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
+              <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+            </svg>
+          </button>
+        </div>`).join('')}
+      </div>
+      <div class="inline-add">
+        <input type="text" id="new-loc-name" placeholder="Uus töökoht...">
+        <input type="color" id="new-loc-color" value="${PRESET_COLORS[state.locations.length % PRESET_COLORS.length]}" style="width:40px;height:36px;padding:2px;border-radius:6px;cursor:pointer;border:0.5px solid var(--border2)">
+        <button class="btn-primary" id="btn-add-loc">Lisa</button>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="btn-cancel">Sulge</button>
+      </div>
+    </div></div>`;
+  }
+
+  if (m.type === 'edit-location') {
+    const loc = state.locations[m.idx];
+    return `<div class="modal-bg" id="modal-bg"><div class="modal">
+      <h3>Muuda töökohta</h3>
+      <label for="edit-loc-name">Nimi</label>
+      <input type="text" id="edit-loc-name" value="${loc.name}">
+      <label for="edit-loc-color">Värv</label>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:6px">
+        <input type="color" id="edit-loc-color" value="${loc.color}" style="width:56px;height:40px;padding:2px;border-radius:8px;cursor:pointer;border:0.5px solid var(--border2)">
+        <div class="color-presets">
+          ${PRESET_COLORS.map(c => `<button class="preset-dot${loc.color===c?' selected':''}" style="background:${c}" data-preset="${c}"></button>`).join('')}
         </div>
       </div>
-    </div>`;
+      <div class="modal-actions">
+        <button class="btn-secondary" id="btn-cancel">Tühista</button>
+        <button class="btn-primary" id="btn-save">Salvesta</button>
+      </div>
+    </div></div>`;
   }
 
   return '';
 }
 
 // ---- EVENTS ----
-
 function attachEvents() {
-  // Navigation
   ge('btn-prev')?.addEventListener('click', () => {
-    state.month--; if (state.month < 0) { state.month = 11; state.year--; } render();
+    state.month--; if (state.month < 0) { state.month=11; state.year--; } render();
   });
   ge('btn-next')?.addEventListener('click', () => {
-    state.month++; if (state.month > 11) { state.month = 0; state.year++; } render();
+    state.month++; if (state.month > 11) { state.month=0; state.year++; } render();
   });
-
-  // View toggle
   document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => {
     state.view = b.dataset.view; render();
   }));
 
-  // Manager buttons
   ge('btn-add-shift')?.addEventListener('click', () => {
     state.modal = {type:'add', day:today.getDate()}; render();
   });
   ge('btn-manage-emp')?.addEventListener('click', () => {
     state.modal = {type:'employees'}; render();
   });
+  ge('btn-manage-loc')?.addEventListener('click', () => {
+    state.modal = {type:'locations'}; render();
+  });
 
-  // Calendar cells
   document.querySelectorAll('[data-addday]').forEach(cell => {
     cell.addEventListener('click', e => {
       if (e.target.closest('[data-shiftid]')) return;
       state.modal = {type:'add', day:parseInt(cell.dataset.addday)}; render();
     });
   });
-
-  // Shift pills
   document.querySelectorAll('[data-shiftid]').forEach(pill => {
     pill.addEventListener('click', e => {
       e.stopPropagation();
       const key = pill.dataset.key;
-      const id = pill.dataset.shiftid;
-      const shift = (state.shifts[key]||[]).find(s => s.id === id);
+      const shift = (state.shifts[key]||[]).find(s => s.id === pill.dataset.shiftid);
       if (shift) { state.modal = {type:'edit', key, shift}; render(); }
     });
   });
 
-  // Swap approve/reject
   document.querySelectorAll('[data-approve]').forEach(b => b.addEventListener('click', () => {
     const r = state.swapRequests.find(x => x.id === b.dataset.approve);
-    if (r) { r.status = 'approved'; save(); render(); }
+    if (r) { r.status='approved'; save(); render(); }
   }));
   document.querySelectorAll('[data-reject]').forEach(b => b.addEventListener('click', () => {
     state.swapRequests = state.swapRequests.filter(x => x.id !== b.dataset.reject);
     save(); render();
   }));
 
-  // Worker employee selector
   ge('emp-select')?.addEventListener('change', e => {
     state.selectedEmployee = e.target.value; render();
   });
@@ -422,95 +487,123 @@ function attachEvents() {
     state.modal = {type:'swap'}; render();
   });
 
-  // Modal background click to close
   ge('modal-bg')?.addEventListener('click', e => {
-    if (e.target === ge('modal-bg')) { state.modal = null; render(); }
+    if (e.target === ge('modal-bg')) { state.modal=null; render(); }
   });
+  ge('btn-cancel')?.addEventListener('click', () => { state.modal=null; render(); });
 
-  // Modal cancel
-  ge('btn-cancel')?.addEventListener('click', () => { state.modal = null; render(); });
-
-  // Modal delete
   ge('btn-delete')?.addEventListener('click', () => {
     const m = state.modal;
-    if (state.shifts[m.key]) {
-      state.shifts[m.key] = state.shifts[m.key].filter(s => s.id !== m.shift.id);
-    }
-    save(); state.modal = null; render();
+    if (state.shifts[m.key]) state.shifts[m.key] = state.shifts[m.key].filter(s => s.id !== m.shift.id);
+    save(); state.modal=null; render();
   });
 
-  // Modal save
   ge('btn-save')?.addEventListener('click', () => {
     const m = state.modal;
-
     if (m.type === 'add') {
       const emp = ge('m-emp').value;
       const dateVal = ge('m-date').value;
+      const locId = ge('m-loc').value;
       const start = ge('m-start').value;
       const end = ge('m-end').value;
       if (!dateVal || !start || !end) return;
-      const [y, mo, d] = dateVal.split('-').map(Number);
+      const [y,mo,d] = dateVal.split('-').map(Number);
       const key = shiftKey(y, mo-1, d);
       if (!state.shifts[key]) state.shifts[key] = [];
       const existing = state.shifts[key].find(s => s.emp === emp);
-      if (existing) { existing.start = start; existing.end = end; }
-      else { state.shifts[key].push({emp, start, end, id:uid()}); }
-      state.year = y; state.month = mo-1;
-
+      if (existing) { existing.start=start; existing.end=end; existing.locId=locId; }
+      else state.shifts[key].push({emp, start, end, locId, id:uid()});
+      state.year=y; state.month=mo-1;
     } else if (m.type === 'edit') {
+      const locId = ge('m-loc').value;
       const start = ge('m-start').value;
       const end = ge('m-end').value;
       const s = (state.shifts[m.key]||[]).find(x => x.id === m.shift.id);
-      if (s) { s.start = start; s.end = end; }
-
+      if (s) { s.start=start; s.end=end; s.locId=locId; }
     } else if (m.type === 'swap') {
       const fromVal = ge('m-from').value;
       const toDateVal = ge('m-todate').value;
       if (!fromVal || !toDateVal) return;
-      const [fromKey, fromStart, fromEnd] = fromVal.split('|');
-      const [y, mo, d] = toDateVal.split('-').map(Number);
+      const [fromKey,fromStart,fromEnd] = fromVal.split('|');
+      const [y,mo,d] = toDateVal.split('-').map(Number);
       const toKey = shiftKey(y, mo-1, d);
       const emp = state.selectedEmployee || state.employees[0];
       state.swapRequests.push({id:uid(), emp, fromKey, fromStart, fromEnd, toKey, status:'pending'});
+    } else if (m.type === 'edit-location') {
+      const name = ge('edit-loc-name').value.trim();
+      const color = ge('edit-loc-color').value;
+      if (!name) return;
+      const oldName = state.locations[m.idx].name;
+      state.locations[m.idx].name = name;
+      state.locations[m.idx].color = color;
+      // Update location name in existing shifts is not needed since we use id
+      state.modal = {type:'locations'};
+      save(); render(); return;
     }
-
-    save(); state.modal = null; render();
+    save(); state.modal=null; render();
   });
 
-  // Employees modal — add new employee
+  // Color preset dots in edit-location modal
+  document.querySelectorAll('[data-preset]').forEach(dot => {
+    dot.addEventListener('click', () => {
+      const colorInput = ge('edit-loc-color');
+      if (colorInput) {
+        colorInput.value = dot.dataset.preset;
+        document.querySelectorAll('.preset-dot').forEach(d => d.classList.remove('selected'));
+        dot.classList.add('selected');
+      }
+    });
+  });
+
+  // Employees modal
   ge('btn-add-emp')?.addEventListener('click', () => {
     const input = ge('new-emp-name');
     const name = input.value.trim();
-    if (!name) return;
-    if (state.employees.includes(name)) { input.style.borderColor='red'; return; }
+    if (!name || state.employees.includes(name)) { input.style.borderColor='red'; return; }
     state.employees.push(name);
     if (!state.selectedEmployee) state.selectedEmployee = name;
-    save();
-    // Re-render just the modal content without closing it
-    state.modal = {type:'employees'};
-    render();
+    save(); state.modal={type:'employees'}; render();
   });
-
-  // Employees modal — allow Enter key
-  ge('new-emp-name')?.addEventListener('keydown', e => {
-    if (e.key === 'Enter') ge('btn-add-emp')?.click();
-  });
-
-  // Employees modal — remove employee buttons
+  ge('new-emp-name')?.addEventListener('keydown', e => { if(e.key==='Enter') ge('btn-add-emp')?.click(); });
   document.querySelectorAll('[data-remove-emp]').forEach(b => {
     b.addEventListener('click', () => {
       const idx = parseInt(b.dataset.removeEmp);
       const removed = state.employees[idx];
       state.employees.splice(idx, 1);
-      if (state.selectedEmployee === removed) {
-        state.selectedEmployee = state.employees[0] || null;
-      }
-      // Remove their shifts too
+      if (state.selectedEmployee === removed) state.selectedEmployee = state.employees[0]||null;
       Object.keys(state.shifts).forEach(key => {
         state.shifts[key] = state.shifts[key].filter(s => s.emp !== removed);
       });
-      save();
-      state.modal = {type:'employees'};
+      save(); state.modal={type:'employees'}; render();
+    });
+  });
+
+  // Locations modal
+  ge('btn-add-loc')?.addEventListener('click', () => {
+    const nameInput = ge('new-loc-name');
+    const colorInput = ge('new-loc-color');
+    const name = nameInput.value.trim();
+    const color = colorInput.value;
+    if (!name) { nameInput.style.borderColor='red'; return; }
+    state.locations.push({id:uid(), name, color});
+    save(); state.modal={type:'locations'}; render();
+  });
+  ge('new-loc-name')?.addEventListener('keydown', e => { if(e.key==='Enter') ge('btn-add-loc')?.click(); });
+  document.querySelectorAll('[data-remove-loc]').forEach(b => {
+    b.addEventListener('click', () => {
+      const idx = parseInt(b.dataset.removeLoc);
+      const locId = state.locations[idx].id;
+      state.locations.splice(idx, 1);
+      // Clear locId from shifts
+      Object.keys(state.shifts).forEach(key => {
+        state.shifts[key].forEach(s => { if(s.locId===locId) s.locId=null; });
+      });
+      save(); state.modal={type:'locations'}; render();
+    });
+  });
+  document.querySelectorAll('[data-edit-loc]').forEach(b => {
+    b.addEventListener('click', () => {
+      state.modal = {type:'edit-location', idx:parseInt(b.dataset.editLoc)};
       render();
     });
   });
