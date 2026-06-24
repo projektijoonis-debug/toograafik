@@ -4,13 +4,13 @@
 // FIREBASE CONFIG — asenda need väärtused oma Firebase projektiga
 // ================================================================
 const FIREBASE_CONFIG = {
-  apiKey:            "AIzaSyBTpQu9X7VQ1agNPZD-rSJnQakQZU1MkaU",
-  authDomain:        "toograafik-e3944.firebaseapp.com",
-  databaseURL:       "https://toograafik-e3944-default-rtdb.europe-west1.firebasedatabase.app",
-  projectId:         "toograafik-e3944",
-  storageBucket:     "toograafik-e3944.firebasestorage.app",
-  messagingSenderId: "162416573043",
-  appId:             "1:162416573043:web:499b6dfd6190baa1b68806"
+  apiKey:            "ASENDA_API_KEY",
+  authDomain:        "ASENDA_PROJECT_ID.firebaseapp.com",
+  databaseURL:       "https://ASENDA_PROJECT_ID-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId:         "ASENDA_PROJECT_ID",
+  storageBucket:     "ASENDA_PROJECT_ID.appspot.com",
+  messagingSenderId: "ASENDA_MESSAGING_SENDER_ID",
+  appId:             "ASENDA_APP_ID"
 };
 // ================================================================
 
