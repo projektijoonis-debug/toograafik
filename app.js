@@ -90,7 +90,6 @@ function startListeners() {
 
       if (!state.loaded) {
         state.loaded = true;
-        // Kui ollakse administraator, suunatakse otse juhi vaatesse, muidu jääb töötaja vaade
         state.view = state.isAdmin ? 'manager' : 'worker';
         if (Object.keys(state.shifts).length === 0) {
           initDemo();
@@ -215,7 +214,6 @@ function buildHeader() {
     ? `<span class="sync-dot syncing" title="Salvestab..."></span>`
     : `<span class="sync-dot ok" title="Sünkroonitud"></span>`;
 
-  // Kui ollakse sisse logitud administraatorina, kuvatakse vaate nupud ja väljalogimise nupp
   let viewControls = '';
   if (state.isAdmin) {
     viewControls = `
@@ -225,7 +223,6 @@ function buildHeader() {
         <button id="btn-logout" class="view-btn" style="border-color:#C0392B; color:#C0392B;">Logi välja</button>
       </div>`;
   } else {
-    // Tavakasutajad näevad ainult sisselogimise nuppu
     viewControls = `
       <div class="view-toggle">
         <button id="btn-login-prompt" class="view-btn" style="background:var(--blue); color:#fff; border-color:var(--blue);">Logi sisse juhina</button>
@@ -293,6 +290,7 @@ function buildManagerView() {
   ${buildSwapSection()}`;
 }
 
+// Uuendatud kalendri joonistamine: toetab töötaja vaate jaoks lugejarežiimi (Ettepanek 3.2)
 function buildCalendar() {
   const y = state.year, m = state.month;
   const firstDow = new Date(y, m, 1).getDay();
@@ -314,12 +312,27 @@ function buildCalendar() {
       const bg = loc ? lightBg(loc.color) : 'var(--bg2)';
       const border = loc ? loc.color : 'var(--border2)';
       const text = loc ? loc.color : 'var(--text2)';
-      return `<span class="shift-pill" style="background:${bg};color:${text};border-left:3px solid ${border}" data-shiftid="${s.id}" data-key="${key}">${s.emp} ${s.start}</span>`;
+      
+      // Kui ollakse juhi vaates, saab klikkides muuta. Töötaja vaates avab klikkimine hoopis vahetuse pakkumise (Ettepanek 3.2)
+      if (state.view === 'manager') {
+        return `<span class="shift-pill" style="background:${bg};color:${text};border-left:3px solid ${border}" data-shiftid="${s.id}" data-key="${key}">${s.emp} ${s.start}</span>`;
+      } else {
+        return `<span class="shift-pill worker-shift-pill" style="background:${bg};color:${text};border-left:3px solid ${border}" data-swap-emp="${s.emp}" data-swap-key="${key}">${s.emp} ${s.start}</span>`;
+      }
     }).join('');
-    cells += `<div class="cal-cell${isToday?' today':''}" data-addday="${d}">
-      <div class="day-num">${d}</div>${pills}
-      ${extra > 0 ? `<span class="more-tag" data-moreday="${d}" style="cursor:pointer; font-weight:600; text-decoration:underline;">+${extra} veel</span>` : ''}
-    </div>`;
+
+    if (state.view === 'manager') {
+      cells += `<div class="cal-cell${isToday?' today':''}" data-addday="${d}">
+        <div class="day-num">${d}</div>${pills}
+        ${extra > 0 ? `<span class="more-tag" data-moreday="${d}" style="cursor:pointer; font-weight:600; text-decoration:underline;">+${extra} veel</span>` : ''}
+      </div>`;
+    } else {
+      // Töötaja vaates on lahtril klikkimine lukus (ei lase vahetust luua)
+      cells += `<div class="cal-cell${isToday?' today':''}">
+        <div class="day-num">${d}</div>${pills}
+        ${extra > 0 ? `<span class="more-tag" data-moreday="${d}" style="cursor:pointer; font-weight:600; text-decoration:underline;">+${extra} veel</span>` : ''}
+      </div>`;
+    }
   }
   const tail = (7 - (offset+dim)%7) % 7;
   for (let i = 1; i <= tail; i++) {
@@ -331,7 +344,6 @@ function buildCalendar() {
   </div>`;
 }
 
-// Uuendatud taotluste ja soovide kuvamine juhile (kinnitamata ootel taotlused)
 function buildSwapSection() {
   const pending = state.swapRequests.filter(r => r.status === 'pending');
   if (!pending.length) return '';
@@ -363,7 +375,7 @@ function buildSwapSection() {
   }).join('')}`;
 }
 
-// Töötaja vaade koos teise töötaja vahetuspalvete kinnitamisega (Ettepanek 2.1)
+// Töötaja vaade koos teise töötaja vahetuspalvete kinnitamisega ja meeskonna kalendriga (Ettepanek 3.2)
 function buildWorkerView() {
   if (!state.employees.length) return `<div class="empty-msg">Töötajaid pole lisatud.</div>`;
   const emp = state.selectedEmployee || state.employees[0];
@@ -378,7 +390,6 @@ function buildWorkerView() {
     });
   }
   
-  // Sorteerime välja taotlused, mis ootavad selle töötaja (B) nõusolekut ja enda saadetud taotlused
   const myReqs = state.swapRequests.filter(r => r.emp === emp);
   const peerReqs = state.swapRequests.filter(r => r.targetEmp === emp && r.status === 'pending_peer');
 
@@ -422,6 +433,12 @@ function buildWorkerView() {
     </div>
   </div>
   ${peerBlock}
+
+  <div class="section-head">Kogu meeskonna töögraafik</div>
+  ${buildLegend()}
+  ${buildCalendar()}
+
+  <div class="section-head" style="margin-top: 2rem;">Minu selle kuu vahetused (${myShifts.length})</div>
   <div class="worker-section">
     ${myShifts.length === 0
       ? `<div class="empty-msg">Sellel kuul vahetusi pole</div>`
@@ -531,7 +548,7 @@ function buildModal() {
     </div></div>`;
   }
 
-  // Uuendatud vahetuse taotlemise modal - sisaldab teise töötaja valikut (Ettepanek 2.1)
+  // Uuendatud vahetuse taotlemise modal - sisaldab pre-selected väärtuste toetust kalendrist klikkides (Ettepanek 3.2)
   if (m.type === 'swap') {
     const y = state.year, mo = state.month;
     const dim = new Date(y, mo+1, 0).getDate();
@@ -549,7 +566,10 @@ function buildModal() {
         <div class="modal-actions"><button class="btn-secondary" id="btn-cancel">Sulge</button></div>
       </div></div>`;
     }
-    const defTo = `${y}-${String(mo+1).padStart(2,'0')}-${String(myShifts[0].d).padStart(2,'0')}`;
+    
+    // Kasutame eelseadistatud väärtusi, kui vajutati otse kalendri vahetusele
+    const preTarget = m.preTargetEmp || '';
+    const preDate = m.preToKey || `${y}-${String(mo+1).padStart(2,'0')}-${String(myShifts[0].d).padStart(2,'0')}`;
     
     // Filtreerime töötajate nimekirjast välja enda nime
     const otherEmps = state.employees.filter(e => e !== emp);
@@ -562,10 +582,10 @@ function buildModal() {
       </select>
       <label>Kellega soovid vahetada?</label>
       <select id="m-target-emp">
-        ${otherEmps.map(e => `<option>${e}</option>`).join('')}
+        ${otherEmps.map(e => `<option${e===preTarget?' selected':''}>${e}</option>`).join('')}
       </select>
       <label>Soovitud kuupäev (millele)</label>
-      <input type="date" id="m-todate" value="${defTo}">
+      <input type="date" id="m-todate" value="${preDate}">
       <div class="modal-actions">
         <button class="btn-secondary" id="btn-cancel">Tühista</button>
         <button class="btn-primary" id="btn-save">Saada taotlus</button>
@@ -650,7 +670,7 @@ function buildModal() {
     </div></div>`;
   }
 
-  // ETTEPANEK 3: Kuvab konkreetse kuupäeva kõik vahetused detailselt
+  // ETTEPANEK 3: Kuvab konkreetse kuupäeva kõik vahetused detailselt (Töötaja vs Juhataja vaade)
   if (m.type === 'day-shifts') {
     const key = shiftKey(state.year, state.month, m.day);
     const dayShifts = state.shifts[key] || [];
@@ -662,13 +682,20 @@ function buildModal() {
           const bg = loc ? lightBg(loc.color) : 'var(--bg2)';
           const border = loc ? loc.color : 'var(--border2)';
           const text = loc ? loc.color : 'var(--text2)';
-          return `<div class="shift-pill" style="background:${bg};color:${text};border-left:3px solid ${border}; cursor:pointer; padding:6px 10px; margin-bottom:6px; border-radius:4px;" data-shiftid="${s.id}" data-key="${key}">
-            <strong>${s.emp}</strong>: ${s.start} - ${s.end} ${loc ? `(${loc.name})` : ''}
-          </div>`;
+          
+          if (state.view === 'manager') {
+            return `<div class="shift-pill" style="background:${bg};color:${text};border-left:3px solid ${border}; cursor:pointer; padding:6px 10px; margin-bottom:6px; border-radius:4px;" data-shiftid="${s.id}" data-key="${key}">
+              <strong>${s.emp}</strong>: ${s.start} - ${s.end} ${loc ? `(${loc.name})` : ''}
+            </div>`;
+          } else {
+            return `<div class="shift-pill worker-shift-pill" style="background:${bg};color:${text};border-left:3px solid ${border}; cursor:pointer; padding:6px 10px; margin-bottom:6px; border-radius:4px;" data-swap-emp="${s.emp}" data-swap-key="${key}">
+              <strong>${s.emp}</strong>: ${s.start} - ${s.end} ${loc ? `(${loc.name})` : ''}
+            </div>`;
+          }
         }).join('')}
       </div>
       <div class="modal-actions">
-        <button class="btn-primary" id="btn-add-from-more" data-day="${m.day}">+ Lisa uus</button>
+        ${state.view === 'manager' ? `<button class="btn-primary" id="btn-add-from-more" data-day="${m.day}">+ Lisa uus</button>` : ''}
         <button class="btn-secondary" id="btn-cancel">Sulge</button>
       </div>
     </div></div>`;
@@ -758,6 +785,29 @@ function attachEvents() {
     });
   });
 
+  // Töötaja vaate kalendris kolleegi vahetuse mulli peale vajutamine (Ettepanek 3.2 otsetee vahetamiseks)
+  document.querySelectorAll('.worker-shift-pill').forEach(pill => {
+    pill.addEventListener('click', e => {
+      e.stopPropagation();
+      const targetEmp = pill.dataset.swapEmp;
+      const toKey = pill.dataset.swapKey;
+      const myEmp = state.selectedEmployee || state.employees[0];
+      
+      if (targetEmp === myEmp) {
+        alert("Sa ei saa enda vahetust endaga vahetada!");
+        return;
+      }
+      
+      state.modal = {
+        type: 'swap',
+        preTargetEmp: targetEmp,
+        preToKey: toKey
+      };
+      state.modalError = null;
+      render();
+    });
+  });
+
   // Ava nimekiri nupule "+X veel" vajutamisel
   document.querySelectorAll('[data-moreday]').forEach(btn => {
     btn.addEventListener('click', e => {
@@ -822,17 +872,13 @@ function attachEvents() {
           const dayShiftsFrom = state.shifts[r.fromKey] || [];
           const dayShiftsTo = state.shifts[r.toKey] || [];
           
-          // Otsime Töötaja A algse vahetuse
           const shiftA = dayShiftsFrom.find(s => s.emp === r.emp && s.start === r.fromStart && s.end === r.fromEnd);
-          // Otsime Töötaja B vahetuse (kui tal sel päeval oli)
           const shiftB = dayShiftsTo.find(s => s.emp === r.targetEmp);
           
           if (shiftA && shiftB) {
-            // Kui mõlemal oli sel päeval vahetus, siis vahetame omanikud
             shiftA.emp = r.targetEmp;
             shiftB.emp = r.emp;
           } else if (shiftA) {
-            // Kui ainult töötajal A oli vahetus, siis määrame vahetuse omanikuks töötaja B
             shiftA.emp = r.targetEmp;
           }
         }
@@ -945,7 +991,6 @@ function attachEvents() {
       const toKey = shiftKey(y, mo-1, d);
       const emp = state.selectedEmployee || state.employees[0];
       
-      // Salvestame oote staatuseks "pending_peer" (Ettepanek 2.1)
       state.swapRequests.push({
         id: uid(),
         emp,
