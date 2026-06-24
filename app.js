@@ -53,36 +53,55 @@ function initFirebase() {
   }
 }
 
-function startListeners() {
-  // Listen to all data in real-time — any change anywhere updates the UI instantly
-  db.ref('/').on('value', snapshot => {
-    const data = snapshot.val() || {};
-    state.shifts        = data.shifts        || {};
-    state.swapRequests  = data.swapRequests  ? Object.values(data.swapRequests) : [];
-    state.employees     = data.employees     || ['Mari','Jaan','Kati','Toomas','Anna','Liis','Peeter','Siim','Eva','Maret'];
-    state.locations     = data.locations     || [
-      {id:'loc1', name:'Kauplus A', color:'#378ADD'},
-      {id:'loc2', name:'Ladu',      color:'#3B9E5A'},
-      {id:'loc3', name:'Kontor',    color:'#E07B2A'},
-    ];
-    if (!state.selectedEmployee || !state.employees.includes(state.selectedEmployee)) {
-      state.selectedEmployee = state.employees[0] || null;
-    }
-    if (!state.loaded) {
-      state.loaded = true;
-      // If brand new project with no shifts, seed demo data
-      if (Object.keys(state.shifts).length === 0) {
-        initDemo();
-        pushAll();
-      }
-    }
-    state.syncing = false;
-    render();
-  }, err => {
-    showError('Andmete laadimine ebaõnnestus: ' + err.message);
-  });
+function toArray(val) {
+  if (!val) return [];
+  if (Array.isArray(val)) return val.filter(Boolean);
+  return Object.values(val).filter(Boolean);
 }
 
+function startListeners() {
+  db.ref('/').on('value', snapshot => {
+    try {
+      const data = snapshot.val() || {};
+
+      state.shifts = data.shifts || {};
+      Object.keys(state.shifts).forEach(k => {
+        state.shifts[k] = toArray(state.shifts[k]);
+      });
+
+      state.swapRequests = toArray(data.swapRequests);
+
+      const emp = toArray(data.employees);
+      state.employees = emp.length > 0 ? emp : ['Mari','Jaan','Kati','Toomas','Anna','Liis','Peeter','Siim','Eva','Maret'];
+
+      const loc = toArray(data.locations);
+      state.locations = loc.length > 0 ? loc : [
+        {id:'loc1', name:'Kauplus A', color:'#378ADD'},
+        {id:'loc2', name:'Ladu',      color:'#3B9E5A'},
+        {id:'loc3', name:'Kontor',    color:'#E07B2A'},
+      ];
+
+      if (!state.selectedEmployee || !state.employees.includes(state.selectedEmployee)) {
+        state.selectedEmployee = state.employees[0] || null;
+      }
+
+      if (!state.loaded) {
+        state.loaded = true;
+        if (Object.keys(state.shifts).length === 0) {
+          initDemo();
+          pushAll();
+        }
+      }
+
+      state.syncing = false;
+      render();
+    } catch(e) {
+      showError('Andmete toötlemisel tekkis viga: ' + e.message);
+    }
+  }, err => {
+    showError('Firebase uhendus ebaonnestus: ' + err.message);
+  });
+}
 function pushAll() {
   if (!db) return;
   state.syncing = true;
