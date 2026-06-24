@@ -1,7 +1,7 @@
 'use strict';
 
 // ================================================================
-// FIREBASE CONFIG — asenda need väärtused oma Firebase projektiga
+// FIREBASE CONFIG — Sinu projekti reaalsete andmetega seadistus
 // ================================================================
 const FIREBASE_CONFIG = {
   apiKey:            "AIzaSyBTpQu9X7VQ1agNPZD-rSJnQakQZU1MkaU",
@@ -10,7 +10,8 @@ const FIREBASE_CONFIG = {
   projectId:         "toograafik-e3944",
   storageBucket:     "toograafik-e3944.firebasestorage.app",
   messagingSenderId: "162416573043",
-  appId:             "1:162416573043:web:499b6dfd6190baa1b68806"
+  appId:             "1:162416573043:web:499b6dfd6190baa1b68806",
+  measurementId:     "G-ZRJVNK4QSC"
 };
 // ================================================================
 
@@ -130,6 +131,10 @@ function shiftKey(y, m, d) {
 }
 function getLocation(id) { return state.locations.find(l => l.id === id); }
 function hexToRgb(hex) {
+  // Kaitseme lehe kokkujooksmise eest, kui mõnel asukohal puudub värv
+  if (!hex || typeof hex !== 'string' || hex[0] !== '#') {
+    return { r: 55, g: 138, b: 221 }; 
+  }
   const r = parseInt(hex.slice(1,3),16);
   const g = parseInt(hex.slice(3,5),16);
   const b = parseInt(hex.slice(5,7),16);
@@ -269,7 +274,7 @@ function buildCalendar() {
     }).join('');
     cells += `<div class="cal-cell${isToday?' today':''}" data-addday="${d}">
       <div class="day-num">${d}</div>${pills}
-      ${extra > 0 ? `<span class="more-tag">+${extra} veel</span>` : ''}
+      ${extra > 0 ? `<span class="more-tag" data-moreday="${d}" style="cursor:pointer; font-weight:600; text-decoration:underline;">+${extra} veel</span>` : ''}
     </div>`;
   }
   const tail = (7 - (offset+dim)%7) % 7;
@@ -510,6 +515,30 @@ function buildModal() {
     </div></div>`;
   }
 
+  // UUS ETTEPANEK 3: Kuvab konkreetse kuupäeva kõik vahetused detailselt
+  if (m.type === 'day-shifts') {
+    const key = shiftKey(state.year, state.month, m.day);
+    const dayShifts = state.shifts[key] || [];
+    return `<div class="modal-bg" id="modal-bg"><div class="modal">
+      <h3>Vahetused: ${m.day}. ${MONTHS[state.month]}</h3>
+      <div class="list-scroll" style="max-height:240px; padding:4px;">
+        ${dayShifts.map(s => {
+          const loc = getLocation(s.locId);
+          const bg = loc ? lightBg(loc.color) : 'var(--bg2)';
+          const border = loc ? loc.color : 'var(--border2)';
+          const text = loc ? loc.color : 'var(--text2)';
+          return `<div class="shift-pill" style="background:${bg};color:${text};border-left:3px solid ${border}; cursor:pointer; padding:6px 10px; margin-bottom:6px; border-radius:4px;" data-shiftid="${s.id}" data-key="${key}">
+            <strong>${s.emp}</strong>: ${s.start} - ${s.end} ${loc ? `(${loc.name})` : ''}
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="modal-actions">
+        <button class="btn-primary" id="btn-add-from-more" data-day="${m.day}">+ Lisa uus</button>
+        <button class="btn-secondary" id="btn-cancel">Sulge</button>
+      </div>
+    </div></div>`;
+  }
+
   return '';
 }
 
@@ -537,7 +566,7 @@ function attachEvents() {
 
   document.querySelectorAll('[data-addday]').forEach(cell => {
     cell.addEventListener('click', e => {
-      if (e.target.closest('[data-shiftid]')) return;
+      if (e.target.closest('[data-shiftid]') || e.target.closest('[data-moreday]')) return;
       state.modal = {type:'add', day:parseInt(cell.dataset.addday)}; render();
     });
   });
@@ -548,6 +577,20 @@ function attachEvents() {
       const shift = (state.shifts[key]||[]).find(s => s.id === pill.dataset.shiftid);
       if (shift) { state.modal = {type:'edit', key, shift}; render(); }
     });
+  });
+
+  // UUS ETTEPANEK 3: Ava nimekiri nupule "+X veel" vajutamisel
+  document.querySelectorAll('[data-moreday]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      state.modal = {type:'day-shifts', day:parseInt(btn.dataset.moreday)}; render();
+    });
+  });
+
+  // UUS ETTEPANEK 3: Lisa uus vahetus otse nimekirja aknast
+  ge('btn-add-from-more')?.addEventListener('click', () => {
+    const day = parseInt(ge('btn-add-from-more').dataset.day);
+    state.modal = {type:'add', day}; render();
   });
 
   document.querySelectorAll('[data-approve]').forEach(b => b.addEventListener('click', () => {
