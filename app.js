@@ -1,10 +1,23 @@
 'use strict';
 
+// ================================================================
+// FIREBASE CONFIG — asenda need väärtused oma Firebase projektiga
+// ================================================================
+const FIREBASE_CONFIG = {
+  apiKey:            "ASENDA_API_KEY",
+  authDomain:        "ASENDA_PROJECT_ID.firebaseapp.com",
+  databaseURL:       "https://ASENDA_PROJECT_ID-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId:         "ASENDA_PROJECT_ID",
+  storageBucket:     "ASENDA_PROJECT_ID.appspot.com",
+  messagingSenderId: "ASENDA_MESSAGING_SENDER_ID",
+  appId:             "ASENDA_APP_ID"
+};
+// ================================================================
+
 const MONTHS = ['Jaanuar','Veebruar','Märts','Aprill','Mai','Juuni',
   'Juuli','August','September','Oktoober','November','Detsember'];
 const DAYS = ['E','T','K','N','R','L','P'];
 const DAYS_FULL = ['Pühapäev','Esmaspäev','Teisipäev','Kolmapäev','Neljapäev','Reede','Laupäev'];
-
 const PRESET_COLORS = [
   '#378ADD','#3B9E5A','#E07B2A','#9B59B6','#E84393',
   '#16A085','#C0392B','#2C3E50','#F39C12','#1ABC9C'
@@ -20,13 +33,76 @@ let state = {
   swapRequests: [],
   modal: null,
   selectedEmployee: null,
-  employees: ['Mari','Jaan','Kati','Toomas','Anna','Liis','Peeter','Siim','Eva','Maret'],
-  locations: [
-    { id: 'loc1', name: 'Kauplus A', color: '#378ADD' },
-    { id: 'loc2', name: 'Ladu', color: '#3B9E5A' },
-    { id: 'loc3', name: 'Kontor', color: '#E07B2A' },
-  ],
+  employees: [],
+  locations: [],
+  syncing: false,
+  loaded: false,
 };
+
+// ---- FIREBASE ----
+let db = null;
+
+function initFirebase() {
+  try {
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.database();
+    startListeners();
+  } catch(e) {
+    console.error('Firebase init error:', e);
+    showError('Firebase ühendus ebaõnnestus. Kontrolli config väärtusi app.js failis.');
+  }
+}
+
+function startListeners() {
+  // Listen to all data in real-time — any change anywhere updates the UI instantly
+  db.ref('/').on('value', snapshot => {
+    const data = snapshot.val() || {};
+    state.shifts        = data.shifts        || {};
+    state.swapRequests  = data.swapRequests  ? Object.values(data.swapRequests) : [];
+    state.employees     = data.employees     || ['Mari','Jaan','Kati','Toomas','Anna','Liis','Peeter','Siim','Eva','Maret'];
+    state.locations     = data.locations     || [
+      {id:'loc1', name:'Kauplus A', color:'#378ADD'},
+      {id:'loc2', name:'Ladu',      color:'#3B9E5A'},
+      {id:'loc3', name:'Kontor',    color:'#E07B2A'},
+    ];
+    if (!state.selectedEmployee || !state.employees.includes(state.selectedEmployee)) {
+      state.selectedEmployee = state.employees[0] || null;
+    }
+    if (!state.loaded) {
+      state.loaded = true;
+      // If brand new project with no shifts, seed demo data
+      if (Object.keys(state.shifts).length === 0) {
+        initDemo();
+        pushAll();
+      }
+    }
+    state.syncing = false;
+    render();
+  }, err => {
+    showError('Andmete laadimine ebaõnnestus: ' + err.message);
+  });
+}
+
+function pushAll() {
+  if (!db) return;
+  state.syncing = true;
+  // Convert swapRequests array to object for Firebase
+  const swapObj = {};
+  state.swapRequests.forEach(r => { swapObj[r.id] = r; });
+  db.ref('/').set({
+    shifts:       state.shifts,
+    swapRequests: swapObj,
+    employees:    state.employees,
+    locations:    state.locations,
+  }).catch(e => showError('Salvestamine ebaõnnestus: ' + e.message));
+}
+
+function showError(msg) {
+  document.getElementById('app').innerHTML =
+    `<div class="app"><div style="padding:2rem;text-align:center;color:#C0392B;font-size:14px">
+      <strong>Viga:</strong> ${msg}
+    </div></div>`;
+}
 
 // ---- UTILS ----
 function uid() { return Math.random().toString(36).slice(2) + Date.now().toString(36); }
@@ -44,32 +120,7 @@ function lightBg(hex) {
   const {r,g,b} = hexToRgb(hex);
   return `rgba(${r},${g},${b},0.13)`;
 }
-function darkText(hex) { return hex; }
 
-// ---- PERSIST ----
-function save() {
-  try {
-    localStorage.setItem('g_shifts', JSON.stringify(state.shifts));
-    localStorage.setItem('g_swaps', JSON.stringify(state.swapRequests));
-    localStorage.setItem('g_employees', JSON.stringify(state.employees));
-    localStorage.setItem('g_locations', JSON.stringify(state.locations));
-  } catch(e) {}
-}
-function load() {
-  try {
-    const s = localStorage.getItem('g_shifts');
-    const w = localStorage.getItem('g_swaps');
-    const e = localStorage.getItem('g_employees');
-    const l = localStorage.getItem('g_locations');
-    if (s) state.shifts = JSON.parse(s);
-    if (w) state.swapRequests = JSON.parse(w);
-    if (e) state.employees = JSON.parse(e);
-    if (l) state.locations = JSON.parse(l);
-  } catch(e) {}
-  if (!state.selectedEmployee || !state.employees.includes(state.selectedEmployee)) {
-    state.selectedEmployee = state.employees[0] || null;
-  }
-}
 function initDemo() {
   const y = state.year, m = state.month;
   const dim = new Date(y, m+1, 0).getDate();
@@ -93,12 +144,23 @@ function initDemo() {
 
 // ---- RENDER ----
 function render() {
+  if (!state.loaded) {
+    document.getElementById('app').innerHTML =
+      `<div class="app"><div style="padding:3rem;text-align:center;color:var(--text3);font-size:14px">
+        <div class="spinner"></div>
+        Laen andmeid...
+      </div></div>`;
+    return;
+  }
   document.getElementById('app').innerHTML =
     `<div class="app">${buildHeader()}${buildBody()}${state.modal ? buildModal() : ''}</div>`;
   attachEvents();
 }
 
 function buildHeader() {
+  const syncDot = state.syncing
+    ? `<span class="sync-dot syncing" title="Salvestab..."></span>`
+    : `<span class="sync-dot ok" title="Sünkroonitud"></span>`;
   return `<div class="header">
     <div class="title">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -106,7 +168,7 @@ function buildHeader() {
         <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/>
         <line x1="3" y1="10" x2="21" y2="10"/>
       </svg>
-      Töögraafik
+      Töögraafik ${syncDot}
     </div>
     <div class="nav">
       <button id="btn-prev">&#8249;</button>
@@ -124,7 +186,6 @@ function buildBody() {
   return state.view === 'manager' ? buildManagerView() : buildWorkerView();
 }
 
-// ---- LEGEND ----
 function buildLegend() {
   if (!state.locations.length) return '';
   return `<div class="legend">
@@ -136,7 +197,6 @@ function buildLegend() {
   </div>`;
 }
 
-// ---- MANAGER ----
 function buildManagerView() {
   return `
   <div class="top-bar">
@@ -183,9 +243,9 @@ function buildCalendar() {
     const extra = dayShifts.length - 3;
     const pills = visible.map(s => {
       const loc = getLocation(s.locId);
-      const bg = loc ? lightBg(loc.color) : '#f0f0f0';
-      const border = loc ? loc.color : '#aaa';
-      const text = loc ? darkText(loc.color) : '#555';
+      const bg = loc ? lightBg(loc.color) : 'var(--bg2)';
+      const border = loc ? loc.color : 'var(--border2)';
+      const text = loc ? loc.color : 'var(--text2)';
       return `<span class="shift-pill" style="background:${bg};color:${text};border-left:3px solid ${border}" data-shiftid="${s.id}" data-key="${key}">${s.emp} ${s.start}</span>`;
     }).join('');
     cells += `<div class="cal-cell${isToday?' today':''}" data-addday="${d}">
@@ -219,7 +279,6 @@ function buildSwapSection() {
   </div>`).join('')}`;
 }
 
-// ---- WORKER ----
 function buildWorkerView() {
   if (!state.employees.length) return `<div class="empty-msg">Töötajaid pole lisatud.</div>`;
   const emp = state.selectedEmployee || state.employees[0];
@@ -250,9 +309,9 @@ function buildWorkerView() {
           const isToday = today.getFullYear()===y && today.getMonth()===m && today.getDate()===d;
           const dow = new Date(y,m,d).getDay();
           const loc = getLocation(s.locId);
-          const bg = loc ? lightBg(loc.color) : '#f5f5f5';
-          const border = loc ? loc.color : '#ccc';
-          const textCol = loc ? loc.color : '#555';
+          const bg = loc ? lightBg(loc.color) : 'var(--bg2)';
+          const border = loc ? loc.color : 'var(--border2)';
+          const textCol = loc ? loc.color : 'var(--text2)';
           return `<div class="emp-row">
             <div class="emp-date">${DAYS_FULL[dow]}, ${d}. ${MONTHS[m].slice(0,3)}${isToday?' <span class="badge badge-info">Täna</span>':''}</div>
             <div class="emp-shifts">
@@ -288,15 +347,15 @@ function buildModal() {
     const defLoc = state.locations[0]?.id || '';
     return `<div class="modal-bg" id="modal-bg"><div class="modal">
       <h3>Lisa vahetus</h3>
-      <label for="m-emp">Töötaja</label>
+      <label>Töötaja</label>
       <select id="m-emp">${state.employees.map(e=>`<option>${e}</option>`).join('')}</select>
-      <label for="m-date">Kuupäev</label>
+      <label>Kuupäev</label>
       <input type="date" id="m-date" value="${defDate}">
-      <label for="m-loc">Töökoht</label>
+      <label>Töökoht</label>
       <select id="m-loc">${locOptions(defLoc)}</select>
-      <label for="m-start">Algus</label>
+      <label>Algus</label>
       <input type="time" id="m-start" value="08:00">
-      <label for="m-end">Lõpp</label>
+      <label>Lõpp</label>
       <input type="time" id="m-end" value="16:00">
       <div class="modal-actions">
         <button class="btn-secondary" id="btn-cancel">Tühista</button>
@@ -308,11 +367,11 @@ function buildModal() {
   if (m.type === 'edit') {
     return `<div class="modal-bg" id="modal-bg"><div class="modal">
       <h3>${m.shift.emp} &mdash; ${m.key}</h3>
-      <label for="m-loc">Töökoht</label>
+      <label>Töökoht</label>
       <select id="m-loc">${locOptions(m.shift.locId)}</select>
-      <label for="m-start">Algus</label>
+      <label>Algus</label>
       <input type="time" id="m-start" value="${m.shift.start}">
-      <label for="m-end">Lõpp</label>
+      <label>Lõpp</label>
       <input type="time" id="m-end" value="${m.shift.end}">
       <div class="modal-actions">
         <button class="btn-danger" id="btn-delete">Kustuta</button>
@@ -342,11 +401,11 @@ function buildModal() {
     const defTo = `${y}-${String(mo+1).padStart(2,'0')}-${String(myShifts[0].d).padStart(2,'0')}`;
     return `<div class="modal-bg" id="modal-bg"><div class="modal">
       <h3>Taotle vahetust</h3>
-      <label for="m-from">Minu vahetus (millest)</label>
+      <label>Minu vahetus (millest)</label>
       <select id="m-from">
         ${myShifts.map(x=>`<option value="${x.key}|${x.s.start}|${x.s.end}">${x.d}. ${MONTHS[mo].slice(0,3)} &mdash; ${x.s.start}&ndash;${x.s.end}</option>`).join('')}
       </select>
-      <label for="m-todate">Soovitud kuupäev (millele)</label>
+      <label>Soovitud kuupäev (millele)</label>
       <input type="date" id="m-todate" value="${defTo}">
       <div class="modal-actions">
         <button class="btn-secondary" id="btn-cancel">Tühista</button>
@@ -360,7 +419,7 @@ function buildModal() {
       <h3>Töötajad</h3>
       <div class="list-scroll">
         ${state.employees.map((e,i) => `<div class="list-row">
-          <span>${e}</span>
+          <span class="list-row-name">${e}</span>
           <button class="btn-icon" data-remove-emp="${i}" title="Kustuta">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
               <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
@@ -385,8 +444,8 @@ function buildModal() {
       <div class="list-scroll">
         ${state.locations.map((l,i) => `<div class="list-row">
           <span class="loc-dot" style="background:${l.color}"></span>
-          <span class="list-row-name" id="loc-name-display-${i}">${l.name}</span>
-          <button class="btn-icon btn-edit-loc" data-edit-loc="${i}" title="Muuda">
+          <span class="list-row-name">${l.name}</span>
+          <button class="btn-icon" data-edit-loc="${i}" title="Muuda">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
@@ -413,11 +472,12 @@ function buildModal() {
 
   if (m.type === 'edit-location') {
     const loc = state.locations[m.idx];
+    if (!loc) return '';
     return `<div class="modal-bg" id="modal-bg"><div class="modal">
       <h3>Muuda töökohta</h3>
-      <label for="edit-loc-name">Nimi</label>
+      <label>Nimi</label>
       <input type="text" id="edit-loc-name" value="${loc.name}">
-      <label for="edit-loc-color">Värv</label>
+      <label>Värv</label>
       <div style="display:flex;align-items:center;gap:12px;margin-top:6px">
         <input type="color" id="edit-loc-color" value="${loc.color}" style="width:56px;height:40px;padding:2px;border-radius:8px;cursor:pointer;border:0.5px solid var(--border2)">
         <div class="color-presets">
@@ -473,11 +533,11 @@ function attachEvents() {
 
   document.querySelectorAll('[data-approve]').forEach(b => b.addEventListener('click', () => {
     const r = state.swapRequests.find(x => x.id === b.dataset.approve);
-    if (r) { r.status='approved'; save(); render(); }
+    if (r) { r.status='approved'; pushAll(); }
   }));
   document.querySelectorAll('[data-reject]').forEach(b => b.addEventListener('click', () => {
     state.swapRequests = state.swapRequests.filter(x => x.id !== b.dataset.reject);
-    save(); render();
+    pushAll();
   }));
 
   ge('emp-select')?.addEventListener('change', e => {
@@ -495,7 +555,7 @@ function attachEvents() {
   ge('btn-delete')?.addEventListener('click', () => {
     const m = state.modal;
     if (state.shifts[m.key]) state.shifts[m.key] = state.shifts[m.key].filter(s => s.id !== m.shift.id);
-    save(); state.modal=null; render();
+    state.modal=null; pushAll();
   });
 
   ge('btn-save')?.addEventListener('click', () => {
@@ -503,7 +563,7 @@ function attachEvents() {
     if (m.type === 'add') {
       const emp = ge('m-emp').value;
       const dateVal = ge('m-date').value;
-      const locId = ge('m-loc').value;
+      const locId = ge('m-loc')?.value || '';
       const start = ge('m-start').value;
       const end = ge('m-end').value;
       if (!dateVal || !start || !end) return;
@@ -515,7 +575,7 @@ function attachEvents() {
       else state.shifts[key].push({emp, start, end, locId, id:uid()});
       state.year=y; state.month=mo-1;
     } else if (m.type === 'edit') {
-      const locId = ge('m-loc').value;
+      const locId = ge('m-loc')?.value || '';
       const start = ge('m-start').value;
       const end = ge('m-end').value;
       const s = (state.shifts[m.key]||[]).find(x => x.id === m.shift.id);
@@ -533,38 +593,35 @@ function attachEvents() {
       const name = ge('edit-loc-name').value.trim();
       const color = ge('edit-loc-color').value;
       if (!name) return;
-      const oldName = state.locations[m.idx].name;
       state.locations[m.idx].name = name;
       state.locations[m.idx].color = color;
-      // Update location name in existing shifts is not needed since we use id
       state.modal = {type:'locations'};
-      save(); render(); return;
+      pushAll(); return;
     }
-    save(); state.modal=null; render();
+    state.modal=null; pushAll();
   });
 
-  // Color preset dots in edit-location modal
   document.querySelectorAll('[data-preset]').forEach(dot => {
     dot.addEventListener('click', () => {
-      const colorInput = ge('edit-loc-color');
-      if (colorInput) {
-        colorInput.value = dot.dataset.preset;
+      const ci = ge('edit-loc-color');
+      if (ci) {
+        ci.value = dot.dataset.preset;
         document.querySelectorAll('.preset-dot').forEach(d => d.classList.remove('selected'));
         dot.classList.add('selected');
       }
     });
   });
 
-  // Employees modal
   ge('btn-add-emp')?.addEventListener('click', () => {
     const input = ge('new-emp-name');
     const name = input.value.trim();
     if (!name || state.employees.includes(name)) { input.style.borderColor='red'; return; }
     state.employees.push(name);
     if (!state.selectedEmployee) state.selectedEmployee = name;
-    save(); state.modal={type:'employees'}; render();
+    state.modal={type:'employees'}; pushAll();
   });
   ge('new-emp-name')?.addEventListener('keydown', e => { if(e.key==='Enter') ge('btn-add-emp')?.click(); });
+
   document.querySelectorAll('[data-remove-emp]').forEach(b => {
     b.addEventListener('click', () => {
       const idx = parseInt(b.dataset.removeEmp);
@@ -574,33 +631,32 @@ function attachEvents() {
       Object.keys(state.shifts).forEach(key => {
         state.shifts[key] = state.shifts[key].filter(s => s.emp !== removed);
       });
-      save(); state.modal={type:'employees'}; render();
+      state.modal={type:'employees'}; pushAll();
     });
   });
 
-  // Locations modal
   ge('btn-add-loc')?.addEventListener('click', () => {
     const nameInput = ge('new-loc-name');
-    const colorInput = ge('new-loc-color');
+    const color = ge('new-loc-color').value;
     const name = nameInput.value.trim();
-    const color = colorInput.value;
     if (!name) { nameInput.style.borderColor='red'; return; }
     state.locations.push({id:uid(), name, color});
-    save(); state.modal={type:'locations'}; render();
+    state.modal={type:'locations'}; pushAll();
   });
   ge('new-loc-name')?.addEventListener('keydown', e => { if(e.key==='Enter') ge('btn-add-loc')?.click(); });
+
   document.querySelectorAll('[data-remove-loc]').forEach(b => {
     b.addEventListener('click', () => {
       const idx = parseInt(b.dataset.removeLoc);
       const locId = state.locations[idx].id;
       state.locations.splice(idx, 1);
-      // Clear locId from shifts
       Object.keys(state.shifts).forEach(key => {
         state.shifts[key].forEach(s => { if(s.locId===locId) s.locId=null; });
       });
-      save(); state.modal={type:'locations'}; render();
+      state.modal={type:'locations'}; pushAll();
     });
   });
+
   document.querySelectorAll('[data-edit-loc]').forEach(b => {
     b.addEventListener('click', () => {
       state.modal = {type:'edit-location', idx:parseInt(b.dataset.editLoc)};
@@ -612,6 +668,4 @@ function attachEvents() {
 function ge(id) { return document.getElementById(id); }
 
 // ---- INIT ----
-load();
-if (Object.keys(state.shifts).length === 0) initDemo();
-render();
+initFirebase();
