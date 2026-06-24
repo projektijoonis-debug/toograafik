@@ -27,13 +27,14 @@ const PRESET_COLORS = [
 const today = new Date();
 
 let state = {
-  view: 'manager',
+  view: 'worker', // Vaikimisi avaneb alati töötaja vaade
   year: today.getFullYear(),
   month: today.getMonth(),
   shifts: {},
   swapRequests: [],
   modal: null,
-  modalError: null, // Lisatud ajutise veateate hoidmiseks
+  modalError: null,
+  isAdmin: localStorage.getItem('isAdmin') === 'true', // Laeb sisselogimise oleku brauseri mälust
   selectedEmployee: null,
   employees: [],
   locations: [],
@@ -89,6 +90,8 @@ function startListeners() {
 
       if (!state.loaded) {
         state.loaded = true;
+        // Kui ollakse administraator, suunatakse otse juhi vaatesse, muidu jääb töötaja vaade
+        state.view = state.isAdmin ? 'manager' : 'worker';
         if (Object.keys(state.shifts).length === 0) {
           initDemo();
           pushAll();
@@ -133,7 +136,6 @@ function shiftKey(y, m, d) {
 function getLocation(id) { return state.locations.find(l => l.id === id); }
 
 function hexToRgb(hex) {
-  // Kaitseme lehe kokkujooksmise eest, kui mõnel asukohal puudub värv
   if (!hex || typeof hex !== 'string' || hex[0] !== '#') {
     return { r: 55, g: 138, b: 221 }; 
   }
@@ -164,7 +166,6 @@ function checkOverlap(emp, key, start, end, excludeShiftId = null) {
     if (s.emp === emp && s.id !== excludeShiftId) {
       const sStart = timeToMins(s.start);
       const sEnd = timeToMins(s.end);
-      // Kontrollime kattuvust: s1 < e2 && s2 < e1
       if (newStart < sEnd && sStart < newEnd) {
         return true;
       }
@@ -213,6 +214,24 @@ function buildHeader() {
   const syncDot = state.syncing
     ? `<span class="sync-dot syncing" title="Salvestab..."></span>`
     : `<span class="sync-dot ok" title="Sünkroonitud"></span>`;
+
+  // Kui ollakse sisse logitud administraatorina, kuvatakse vaate nupud ja väljalogimise nupp
+  let viewControls = '';
+  if (state.isAdmin) {
+    viewControls = `
+      <div class="view-toggle" style="display:flex; align-items:center; gap:8px;">
+        <button class="view-btn${state.view==='manager'?' active':''}" data-view="manager">Juht</button>
+        <button class="view-btn${state.view==='worker'?' active':''}" data-view="worker">Töötaja</button>
+        <button id="btn-logout" class="view-btn" style="border-color:#C0392B; color:#C0392B;">Logi välja</button>
+      </div>`;
+  } else {
+    // Tavakasutajad näevad ainult sisselogimise nuppu
+    viewControls = `
+      <div class="view-toggle">
+        <button id="btn-login-prompt" class="view-btn" style="background:var(--blue); color:#fff; border-color:var(--blue);">Logi sisse juhina</button>
+      </div>`;
+  }
+
   return `<div class="header">
     <div class="title">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -227,10 +246,7 @@ function buildHeader() {
       <span class="month-label">${MONTHS[state.month]} ${state.year}</span>
       <button id="btn-next">&#8250;</button>
     </div>
-    <div class="view-toggle">
-      <button class="view-btn${state.view==='manager'?' active':''}" data-view="manager">Juht</button>
-      <button class="view-btn${state.view==='worker'?' active':''}" data-view="worker">Töötaja</button>
-    </div>
+    ${viewControls}
   </div>`;
 }
 
@@ -315,7 +331,7 @@ function buildCalendar() {
   </div>`;
 }
 
-// Uuendatud taotluste ja soovide kuvamine juhile (kinnitamisel luuakse soovide puhul vahetus automaatselt)
+// Uuendatud taotluste ja soovide kuvamine juhile (kinnitamata ootel taotlused)
 function buildSwapSection() {
   const pending = state.swapRequests.filter(r => r.status === 'pending');
   if (!pending.length) return '';
@@ -335,7 +351,7 @@ function buildSwapSection() {
     } else {
       return `<div class="swap-req">
         <div>
-          <div class="swap-info"><strong>${r.emp} vahetuse taotlus:</strong> ${r.fromKey} &rarr; ${r.toKey}</div>
+          <div class="swap-info"><strong>${r.emp} &harr; ${r.targetEmp} vahetus:</strong> ${r.fromKey} &rarr; ${r.toKey}</div>
           <div class="swap-meta">${r.fromStart}&ndash;${r.fromEnd}</div>
         </div>
         <div class="swap-actions">
@@ -347,7 +363,7 @@ function buildSwapSection() {
   }).join('')}`;
 }
 
-// Uuendatud Töötaja vaade koos nupuga uue kellaaja soovi saatmiseks (Ettepanek 2.3)
+// Töötaja vaade koos teise töötaja vahetuspalvete kinnitamisega (Ettepanek 2.1)
 function buildWorkerView() {
   if (!state.employees.length) return `<div class="empty-msg">Töötajaid pole lisatud.</div>`;
   const emp = state.selectedEmployee || state.employees[0];
@@ -357,12 +373,33 @@ function buildWorkerView() {
   for (let d = 1; d <= dim; d++) {
     const key = shiftKey(y, m, d);
     const dayS = state.shifts[key] || [];
-    // Kuna nüüd saab olla samal päeval mitu vahetust, otsime kõik selle töötaja vahetused päeval
     dayS.forEach(s => {
       if (s.emp === emp) myShifts.push({d, key, s});
     });
   }
+  
+  // Sorteerime välja taotlused, mis ootavad selle töötaja (B) nõusolekut ja enda saadetud taotlused
   const myReqs = state.swapRequests.filter(r => r.emp === emp);
+  const peerReqs = state.swapRequests.filter(r => r.targetEmp === emp && r.status === 'pending_peer');
+
+  let peerBlock = '';
+  if (peerReqs.length) {
+    peerBlock = `
+    <div class="section-head" style="color:#C0392B;">Sulle esitatud vahetuse taotlused (${peerReqs.length})</div>
+    <div class="worker-section" style="border: 0.5px solid #C0392B; margin-top: 0.5rem; background: rgba(192,57,43,0.03);">
+      ${peerReqs.map(r => `
+        <div class="swap-req" style="border-bottom: 0.5px solid rgba(192,57,43,0.1); padding: 12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <div>
+            <div class="swap-info"><strong>${r.emp}</strong> soovib Sinu vahetust kuupäeval <strong>${r.toKey}</strong> ja pakub Sulle vastu oma vahetust kuupäeval <strong>${r.fromKey}</strong> (${r.fromStart}&ndash;${r.fromEnd})</div>
+          </div>
+          <div class="swap-actions">
+            <button class="approve peer-approve-btn" data-peer-approve="${r.id}" style="background:#3B9E5A; color:#fff; border-color:#3B9E5A; padding:4px 10px; border-radius:4px; font-size:12px; cursor:pointer;">✓ Nõustu</button>
+            <button class="reject peer-reject-btn" data-peer-reject="${r.id}" style="background:#C0392B; color:#fff; border-color:#C0392B; padding:4px 10px; border-radius:4px; font-size:12px; cursor:pointer;">✕ Keeldu</button>
+          </div>
+        </div>`).join('')}
+    </div>`;
+  }
+
   return `<div class="top-bar" style="justify-content: space-between;">
     <div style="display:flex; gap:8px; align-items:center;">
       <select id="emp-select">
@@ -384,6 +421,7 @@ function buildWorkerView() {
       </button>
     </div>
   </div>
+  ${peerBlock}
   <div class="worker-section">
     ${myShifts.length === 0
       ? `<div class="empty-msg">Sellel kuul vahetusi pole</div>`
@@ -407,8 +445,19 @@ function buildWorkerView() {
   ${myReqs.length ? `<div class="section-head">Minu taotlused</div>
   <div class="worker-section">
     ${myReqs.map(r => {
-      const badgeClass = r.status === 'pending' ? 'badge-warn' : 'badge-ok';
-      const badgeText = r.status === 'pending' ? 'Ootel' : 'Kinnitatud';
+      let badgeClass = 'badge-warn';
+      let badgeText = 'Ootel';
+      if (r.status === 'pending_peer') {
+        badgeClass = 'badge-warn';
+        badgeText = 'Ootab kolleegi nõusolekut';
+      } else if (r.status === 'pending') {
+        badgeClass = 'badge-warn';
+        badgeText = 'Ootab juhi kinnitust';
+      } else if (r.status === 'approved') {
+        badgeClass = 'badge-ok';
+        badgeText = 'Kinnitatud';
+      }
+
       if (r.type === 'wish') {
         return `<div class="swap-req">
           <div>
@@ -420,7 +469,7 @@ function buildWorkerView() {
       } else {
         return `<div class="swap-req">
           <div>
-            <div class="swap-info"><strong>Vahetuse taotlus:</strong> ${r.fromKey} &rarr; ${r.toKey}</div>
+            <div class="swap-info"><strong>Vahetuse taotlus (kellega: ${r.targetEmp}):</strong> ${r.fromKey} &rarr; ${r.toKey}</div>
             <div class="swap-meta">${r.fromStart}&ndash;${r.fromEnd}</div>
           </div>
           <span class="badge ${badgeClass}">${badgeText}</span>
@@ -482,6 +531,7 @@ function buildModal() {
     </div></div>`;
   }
 
+  // Uuendatud vahetuse taotlemise modal - sisaldab teise töötaja valikut (Ettepanek 2.1)
   if (m.type === 'swap') {
     const y = state.year, mo = state.month;
     const dim = new Date(y, mo+1, 0).getDate();
@@ -500,11 +550,19 @@ function buildModal() {
       </div></div>`;
     }
     const defTo = `${y}-${String(mo+1).padStart(2,'0')}-${String(myShifts[0].d).padStart(2,'0')}`;
+    
+    // Filtreerime töötajate nimekirjast välja enda nime
+    const otherEmps = state.employees.filter(e => e !== emp);
+
     return `<div class="modal-bg" id="modal-bg"><div class="modal">
       <h3>Taotle vahetust</h3>
       <label>Minu vahetus (millest)</label>
       <select id="m-from">
         ${myShifts.map(x=>`<option value="${x.key}|${x.s.start}|${x.s.end}">${x.d}. ${MONTHS[mo].slice(0,3)} &mdash; ${x.s.start}&ndash;${x.s.end}</option>`).join('')}
+      </select>
+      <label>Kellega soovid vahetada?</label>
+      <select id="m-target-emp">
+        ${otherEmps.map(e => `<option>${e}</option>`).join('')}
       </select>
       <label>Soovitud kuupäev (millele)</label>
       <input type="date" id="m-todate" value="${defTo}">
@@ -654,6 +712,27 @@ function attachEvents() {
     state.view = b.dataset.view; render();
   }));
 
+  // Sisselogimise kuulamise funktsioon (Ettepanek 1.1)
+  ge('btn-login-prompt')?.addEventListener('click', () => {
+    const pass = prompt("Sisesta juhi parool:");
+    if (pass === "verevi2026") {
+      state.isAdmin = true;
+      state.view = 'manager';
+      localStorage.setItem('isAdmin', 'true');
+      render();
+    } else if (pass !== null) {
+      alert("Vale parool!");
+    }
+  });
+
+  // Väljalogimise kuulamise funktsioon (Ettepanek 1.1)
+  ge('btn-logout')?.addEventListener('click', () => {
+    state.isAdmin = false;
+    state.view = 'worker';
+    localStorage.removeItem('isAdmin');
+    render();
+  });
+
   ge('btn-add-shift')?.addEventListener('click', () => {
     state.modal = {type:'add', day:today.getDate()}; state.modalError = null; render();
   });
@@ -698,6 +777,25 @@ function attachEvents() {
     state.modal = {type:'add-wish'}; state.modalError = null; render();
   });
 
+  // Töötaja B nõustub vahetusega (Ettepanek 2.1)
+  document.querySelectorAll('.peer-approve-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      const r = state.swapRequests.find(x => x.id === b.dataset.peerApprove);
+      if (r) {
+        r.status = 'pending'; // Nõusolek antud, läheb juhi kätte ootele
+        pushAll();
+      }
+    });
+  });
+
+  // Töötaja B keeldub vahetusest (Ettepanek 2.1)
+  document.querySelectorAll('.peer-reject-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      state.swapRequests = state.swapRequests.filter(x => x.id !== b.dataset.peerReject);
+      pushAll();
+    });
+  });
+
   document.querySelectorAll('[data-approve]').forEach(b => {
     b.addEventListener('click', () => {
       const r = state.swapRequests.find(x => x.id === b.dataset.approve);
@@ -709,7 +807,6 @@ function attachEvents() {
           const key = r.toKey;
           if (!state.shifts[key]) state.shifts[key] = [];
 
-          // Igaks juhuks kontrollime enne salvestamist, ega juhuslikult vahepeal teist vahetust ette pole tehtud
           if (!checkOverlap(r.emp, key, r.toStart, r.toEnd)) {
             state.shifts[key].push({
               emp: r.emp,
@@ -718,6 +815,25 @@ function attachEvents() {
               locId: state.locations[0]?.id || '', // Vaikimisi määratakse esimene asukoht
               id: uid()
             });
+          }
+        } 
+        // KUI TEGU ON OMAVAHELISE VAHETUSEGA (Ettepanek 2.1 - Juht kinnitab)
+        else {
+          const dayShiftsFrom = state.shifts[r.fromKey] || [];
+          const dayShiftsTo = state.shifts[r.toKey] || [];
+          
+          // Otsime Töötaja A algse vahetuse
+          const shiftA = dayShiftsFrom.find(s => s.emp === r.emp && s.start === r.fromStart && s.end === r.fromEnd);
+          // Otsime Töötaja B vahetuse (kui tal sel päeval oli)
+          const shiftB = dayShiftsTo.find(s => s.emp === r.targetEmp);
+          
+          if (shiftA && shiftB) {
+            // Kui mõlemal oli sel päeval vahetus, siis vahetame omanikud
+            shiftA.emp = r.targetEmp;
+            shiftB.emp = r.emp;
+          } else if (shiftA) {
+            // Kui ainult töötajal A oli vahetus, siis määrame vahetuse omanikuks töötaja B
+            shiftA.emp = r.targetEmp;
           }
         }
         pushAll();
@@ -755,7 +871,6 @@ function attachEvents() {
     const end = ge('m-wish-end').value;
     if (!dateVal || !start || !end) return;
 
-    // Kontrollime, et lõppaeg oleks pärast algusaega
     if (timeToMins(start) >= timeToMins(end)) {
       state.modalError = "Lõpuaeg peab olema pärast algusaega!";
       render();
@@ -766,14 +881,12 @@ function attachEvents() {
     const toKey = shiftKey(y, mo-1, d);
     const emp = state.selectedEmployee || state.employees[0];
 
-    // Kontrollime, ega töötajal pole sel ajal juba graafikusse kinnitatud vahetust
     if (checkOverlap(emp, toKey, start, end)) {
       state.modalError = "Sul on sel ajal juba graafikus teine vahetus!";
       render();
       return;
     }
 
-    // Salvestame soovi eraldi tüübina "wish"
     state.swapRequests.push({
       id: uid(),
       emp,
@@ -800,7 +913,6 @@ function attachEvents() {
       const [y,mo,d] = dateVal.split('-').map(Number);
       const key = shiftKey(y, mo-1, d);
 
-      // Kellaaegade kattuvuse kontroll (Variant B)
       if (checkOverlap(emp, key, start, end)) {
         state.modalError = `Töötajal ${emp} on sel ajal juba teine vahetus!`;
         render();
@@ -815,7 +927,6 @@ function attachEvents() {
       const start = ge('m-start').value;
       const end = ge('m-end').value;
 
-      // Kellaaegade kattuvuse kontroll (Variant B)
       if (checkOverlap(m.shift.emp, m.key, start, end, m.shift.id)) {
         state.modalError = `Töötajal ${m.shift.emp} on sel ajal juba teine vahetus!`;
         render();
@@ -827,12 +938,25 @@ function attachEvents() {
     } else if (m.type === 'swap') {
       const fromVal = ge('m-from').value;
       const toDateVal = ge('m-todate').value;
-      if (!fromVal || !toDateVal) return;
+      const targetEmp = ge('m-target-emp').value;
+      if (!fromVal || !toDateVal || !targetEmp) return;
       const [fromKey,fromStart,fromEnd] = fromVal.split('|');
       const [y,mo,d] = toDateVal.split('-').map(Number);
       const toKey = shiftKey(y, mo-1, d);
       const emp = state.selectedEmployee || state.employees[0];
-      state.swapRequests.push({id:uid(), emp, fromKey, fromStart, fromEnd, toKey, status:'pending'});
+      
+      // Salvestame oote staatuseks "pending_peer" (Ettepanek 2.1)
+      state.swapRequests.push({
+        id: uid(),
+        emp,
+        targetEmp,
+        fromKey,
+        fromStart,
+        fromEnd,
+        toKey,
+        type: 'swap',
+        status: 'pending_peer'
+      });
     } else if (m.type === 'edit-location') {
       const name = ge('edit-loc-name').value.trim();
       const color = ge('edit-loc-color').value;
