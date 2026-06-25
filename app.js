@@ -18,7 +18,7 @@ const FIREBASE_CONFIG = {
 // Lisa siia juhi Firebase Auth e-post(id). Sama e-post peab olema lubatud ka
 // Firebase Realtime Database Rules failis, sest kliendipoolne kontroll ei ole turvapiir.
 const MANAGER_EMAILS = [
-  'juht@example.com'
+  'projektijoonis@gmail.com'
 ];
 
 const MONTHS = ['Jaanuar','Veebruar','Märts','Aprill','Mai','Juuni',
