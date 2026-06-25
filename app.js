@@ -65,7 +65,19 @@ let state = {
 // ---- FIREBASE / AUTH ----
 function initFirebase() {
   try {
-    firebase.initializeApp(FIREBASE_CONFIG);
+    if (typeof firebase === 'undefined') {
+      throw new Error('Firebase SDK ei ole laetud. Kontrolli internetiühendust ja index.html skripte.');
+    }
+    if (typeof firebase.auth !== 'function') {
+      throw new Error('Firebase Auth SDK ei ole laetud. index.html peab sisaldama firebase-auth-compat.js faili enne app.js faili.');
+    }
+    if (typeof firebase.database !== 'function') {
+      throw new Error('Firebase Database SDK ei ole laetud. index.html peab sisaldama firebase-database-compat.js faili enne app.js faili.');
+    }
+
+    if (!firebase.apps.length) {
+      firebase.initializeApp(FIREBASE_CONFIG);
+    }
     db = firebase.database();
     auth = firebase.auth();
     auth.onAuthStateChanged(user => {
@@ -93,7 +105,7 @@ function initFirebase() {
     });
   } catch(e) {
     console.error('Firebase init error:', e);
-    showFatalError('Firebase ühendus ebaõnnestus. Kontrolli Firebase seadistust.');
+    showFatalError('Firebase ühendus ebaõnnestus: ' + escapeHtml(e.message || e));
   }
 }
 
