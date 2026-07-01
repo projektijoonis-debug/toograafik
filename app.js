@@ -50,6 +50,7 @@ let state = {
   swapRequests: [],
   modal: null,
   modalError: null,
+  banner: null,
   user: null,
   isManager: false,
   selectedEmployee: null,
@@ -204,11 +205,12 @@ function authErrorMessage(e) {
 function pushAll() {
   if (!db || !state.isManager) return;
   state.syncing = true;
-  const swapObj = {};
-  state.swapRequests.forEach(r => { if (r && r.id) swapObj[r.id] = r; });
-  db.ref('/').set({
+  // NB: db.ref('/').update(...) — MITTE .set('/') — sest Firebase turvareeglid
+  // valideerivad mitme-asukoha update() puhul iga tipptaseme haru (shifts/employees/
+  // locations) eraldi oma .write reegli järgi. Kogu juure set() kontrollib ainult
+  // juure enda .write reeglit ja jääks reeglite järgi alati PERMISSION_DENIED külge.
+  db.ref('/').update({
     shifts: state.shifts,
-    swapRequests: swapObj,
     employees: state.employees,
     locations: state.locations,
   }).catch(e => showModalError('Salvestamine ebaõnnestus: ' + e.message));
@@ -284,8 +286,14 @@ function showFatalError(msg) {
 }
 
 function showModalError(msg) {
-  state.modalError = msg;
   state.syncing = false;
+  // Kui modaal on juba kinni (nt salvestus ebaõnnestus alles pärast modaali
+  // sulgemist), ei ole modalError kuskil nähtav — näita siis lehe ülaosas banner.
+  if (state.modal) {
+    state.modalError = msg;
+  } else {
+    state.banner = msg;
+  }
   render();
 }
 
@@ -407,8 +415,16 @@ function render() {
     return;
   }
 
-  app.innerHTML = `<div class="app">${buildHeader()}${buildBody()}${state.modal ? buildModal() : ''}</div>`;
+  app.innerHTML = `<div class="app">${buildHeader()}${buildBanner()}${buildBody()}${state.modal ? buildModal() : ''}</div>`;
   attachEvents();
+}
+
+function buildBanner() {
+  if (!state.banner) return '';
+  return `<div id="error-banner" style="background:#FDEDEC;color:#C0392B;padding:10px 16px;font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid #F5B7B1;">
+    <span>${esc(state.banner)}</span>
+    <button id="banner-close" style="background:none;border:none;color:#C0392B;font-weight:700;cursor:pointer;font-size:16px;line-height:1;">&times;</button>
+  </div>`;
 }
 
 function loadingHtml(text) {
@@ -911,6 +927,7 @@ function attachEvents() {
     state.month++; if (state.month > 11) { state.month=0; state.year++; } render();
   });
   ge('btn-logout')?.addEventListener('click', () => auth.signOut());
+  ge('banner-close')?.addEventListener('click', () => { state.banner = null; render(); });
 
   document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => {
     if (b.dataset.view === 'manager' && !state.isManager) return;
@@ -1048,6 +1065,7 @@ function approveRequest(id) {
       id: uid()
     });
     r.status = 'approved';
+    updateSwapStatus(r.id, 'approved');
   } else {
     const shiftA = findShiftByRequest(r);
     const shiftB = findShiftByEmpAndDate(r.targetEmp, r.toKey);
@@ -1062,6 +1080,7 @@ function approveRequest(id) {
     shiftA.shift.emp = r.targetEmp;
     shiftB.shift.emp = r.emp;
     r.status = 'approved';
+    updateSwapStatus(r.id, 'approved');
   }
   pushAll();
 }
